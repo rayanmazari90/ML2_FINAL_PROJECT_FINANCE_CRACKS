@@ -53,9 +53,10 @@ _WIKI_URL = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
 def _read_wiki_tables():
     """Fetch Wikipedia S&P 500 tables, handling SSL + User-Agent issues."""
     import requests as _req
+    from io import StringIO
     resp = _req.get(_WIKI_URL, headers={"User-Agent": "Mozilla/5.0"}, timeout=30)
     resp.raise_for_status()
-    return pd.read_html(resp.text)
+    return pd.read_html(StringIO(resp.text))
 
 
 def _fetch_current_sp500() -> pd.DataFrame:

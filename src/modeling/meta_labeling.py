@@ -152,17 +152,18 @@ def _out_of_fold_primary_predictions(
     observation's meta-target is derived from a model that never
     saw that observation.
     """
-    from sklearn.model_selection import KFold
-
-    oof_preds = np.full(len(y_train), -1, dtype=int)
+    # NaN sentinel: fold 0 has no history to train on, so it gets no prediction.
+    oof_preds = np.full(len(y_train), np.nan)
     sorted_idx = dates_train.argsort().values
     fold_size = len(sorted_idx) // n_folds
 
-    for k in range(n_folds):
+    # Start at k=1: fold 0 has no prior data, so skip it.
+    # tr_idx uses only past folds — never future ones.
+    for k in range(1, n_folds):
         val_start = k * fold_size
         val_end = (k + 1) * fold_size if k < n_folds - 1 else len(sorted_idx)
         val_idx = sorted_idx[val_start:val_end]
-        tr_idx = np.concatenate([sorted_idx[:val_start], sorted_idx[val_end:]])
+        tr_idx = sorted_idx[:val_start]  # past only
 
         model = build_primary_model(cfg, early_stopping=False)
         model.fit(X_train.iloc[tr_idx], y_train.iloc[tr_idx])
@@ -248,15 +249,22 @@ def run_two_stage_pipeline(
     oof_primary_preds = _out_of_fold_primary_predictions(
         X_tr, y_tr, dates_tr, t_barrier_tr, cfg, n_folds=5,
     )
-    meta_target_train = construct_meta_labels(oof_primary_preds, y_tr)
+    # Fold 0 has no OOF prediction (no past data to train on) — drop those rows
+    # before building meta-labels so NaN sentinels never enter the meta-model.
+    oof_valid = ~np.isnan(oof_primary_preds)
+    meta_target_train = construct_meta_labels(
+        oof_primary_preds[oof_valid].astype(int),
+        y_tr.iloc[oof_valid],
+    )
     print(f"  OOF meta-target balance: "
           f"{(meta_target_train == 1).sum()} correct / "
           f"{(meta_target_train == 0).sum()} incorrect")
+    print(f"  (fold 0 excluded: {(~oof_valid).sum()} obs had no prior training data)")
 
     # Stage 2: Meta-Model
     print("[Phase 4] Training meta-model (Random Forest) …")
     meta_model = build_meta_model(cfg)
-    meta_model = train_meta_model(meta_model, X_tr, meta_target_train)
+    meta_model = train_meta_model(meta_model, X_tr.iloc[oof_valid], meta_target_train)
 
     meta_proba_test = meta_model.predict_proba(X_te)
     meta_prob_correct = (
