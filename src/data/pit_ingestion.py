@@ -447,6 +447,10 @@ def _asof_merge_per_ticker(
     right = right[["ticker", "sec_acceptance_date"] + value_cols].copy()
     right = right.dropna(subset=["sec_acceptance_date"])
 
+    # Align datetime resolution to avoid merge_asof dtype mismatch
+    left["date"] = left["date"].astype("datetime64[us]")
+    right["sec_acceptance_date"] = right["sec_acceptance_date"].astype("datetime64[us]")
+
     parts = []
     for ticker in left["ticker"].unique():
         l = left[left["ticker"] == ticker].sort_values("date")
