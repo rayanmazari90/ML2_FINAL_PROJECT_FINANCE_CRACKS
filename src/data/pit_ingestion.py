@@ -215,6 +215,21 @@ def fetch_pricing(
 
     df = pd.concat(frames, ignore_index=True)
     df["date"] = pd.to_datetime(df["date"])
+
+    # ── Filter corrupted / recycled tickers ──
+    # These are delisted S&P 500 ticker symbols that the data provider
+    # maps to unrelated penny stocks or OTC shells, producing nonsensical
+    # returns (e.g. 34,000x daily moves) that corrupt the entire pipeline.
+    _BAD_TICKERS = {
+        "BMC", "CBE", "COL", "CPWR", "GR", "MI",
+        "PTV", "RSH", "RX", "SLE", "SW", "TIE",
+    }
+    before = df["ticker"].nunique()
+    df = df[~df["ticker"].isin(_BAD_TICKERS)]
+    after = df["ticker"].nunique()
+    if before != after:
+        print(f"  Filtered {before - after} corrupted tickers: {_BAD_TICKERS & set(df['ticker'])}")
+
     return df.sort_values(["ticker", "date"]).reset_index(drop=True)
 
 
