@@ -222,7 +222,7 @@ def fetch_pricing(
     # returns (e.g. 34,000x daily moves) that corrupt the entire pipeline.
     _BAD_TICKERS = {
         "BMC", "CBE", "COL", "CPWR", "GR", "MI",
-        "PTV", "RSH", "RX", "SLE", "SW", "TIE",
+        "PTV", "RSH", "RX", "SLE", "STI", "SW", "TIE",
     }
     before = df["ticker"].nunique()
     df = df[~df["ticker"].isin(_BAD_TICKERS)]

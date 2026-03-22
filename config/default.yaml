@@ -55,7 +55,7 @@ labels:
   method: "triple_barrier"
   upper_barrier_mult: 2.0       # k_upper * daily_vol * sqrt(T)
   lower_barrier_mult: 2.0       # k_lower (asymmetric tighter stops: try 1.5)
-  vertical_barrier_days: 20     # ≈ 1 calendar month
+  vertical_barrier_days: 43     
   ewma_span: 50                 # span for EWMA volatility
   min_return_threshold: 0.0     # discard vertical touches below this
   discard_vertical: false       # if true, drop labels hitting only vertical
@@ -90,7 +90,7 @@ modeling:
 
   bet_sizing:
     method: "half_kelly"           # "meta_prob" | "half_kelly" | "equal"
-    min_meta_probability: 0.49     # zero-out below this
+    min_meta_probability: 0.51     # zero-out below this
     max_position_weight: 0.05      # per-name cap (fraction of leg)
 
 validation:
