@@ -380,18 +380,8 @@ def run_feature_pipeline(
 
     Returns (feature_matrix, fracdiff_d_values).
     """
-    from src.data.pit_ingestion import pit_asof_join
-
     print("[Phase 2] Computing technical features …")
-    tech = compute_technical_features(pricing, cfg)
-
-    print("[Phase 2] Joining PIT fundamentals …")
-    feature_dates = tech[["date", "ticker"]].drop_duplicates()
-    merged = pit_asof_join(feature_dates, fundamentals)
-    merged = merged.merge(tech, on=["date", "ticker"], how="left")
-
-    print("[Phase 2] Computing fundamental ratios …")
-    merged = compute_fundamental_features(merged)
+    merged = compute_technical_features(pricing, cfg)
 
     # Identify numeric feature columns (exclude identifiers)
     exclude = {"date", "ticker", "sector", "fiscal_period_end",
