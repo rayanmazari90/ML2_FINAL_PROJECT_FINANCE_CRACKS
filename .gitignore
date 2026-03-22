@@ -15,6 +15,7 @@ env/
 
 # Local data & caches (regenerate via pipeline / notebooks)
 data/cache/
+data/cache\ copy/
 
 # Secrets & local env
 .env
