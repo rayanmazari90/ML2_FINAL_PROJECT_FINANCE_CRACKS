@@ -390,6 +390,19 @@ def run_feature_pipeline(
     merged = pit_asof_join(feature_dates, fundamentals)
     merged = merged.merge(tech, on=["date", "ticker"], how="left")
 
+    # Drop rows where no prior filing was available (pre-earliest-filing dates).
+    # These have NaN for all fundamental columns and cannot produce valid ratios.
+    fund_cols = ["revenue", "net_income", "total_assets", "total_liabilities",
+                 "stockholders_equity", "operating_cash_flow"]
+    fund_present = [c for c in fund_cols if c in merged.columns]
+    if fund_present:
+        before = len(merged)
+        merged = merged.dropna(subset=fund_present, how="all")
+        dropped = before - len(merged)
+        if dropped:
+            print(f"  Dropped {dropped:,} rows with no fundamental coverage "
+                  f"({dropped / before:.1%} of total)")
+
     print("[Phase 2] Computing fundamental ratios …")
     merged = compute_fundamental_features(merged)
 

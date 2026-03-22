@@ -152,8 +152,8 @@ def _out_of_fold_primary_predictions(
     observation's meta-target is derived from a model that never
     saw that observation.
     """
-    # NaN sentinel: fold 0 has no history to train on, so it gets no prediction.
-    oof_preds = np.full(len(y_train), np.nan)
+    # -1 sentinel: fold 0 has no history to train on, so it gets no prediction.
+    oof_preds = np.full(len(y_train), -1, dtype=int)
     sorted_idx = dates_train.argsort().values
     fold_size = len(sorted_idx) // n_folds
 
@@ -250,10 +250,10 @@ def run_two_stage_pipeline(
         X_tr, y_tr, dates_tr, t_barrier_tr, cfg, n_folds=5,
     )
     # Fold 0 has no OOF prediction (no past data to train on) — drop those rows
-    # before building meta-labels so NaN sentinels never enter the meta-model.
-    oof_valid = ~np.isnan(oof_primary_preds)
+    # before building meta-labels so sentinel values never enter the meta-model.
+    oof_valid = oof_primary_preds != -1
     meta_target_train = construct_meta_labels(
-        oof_primary_preds[oof_valid].astype(int),
+        oof_primary_preds[oof_valid],
         y_tr.iloc[oof_valid],
     )
     print(f"  OOF meta-target balance: "
