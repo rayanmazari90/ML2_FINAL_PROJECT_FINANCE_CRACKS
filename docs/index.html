@@ -198,7 +198,7 @@ canvas#particles{position:fixed;inset:0;z-index:0;pointer-events:none;opacity:.1
 #s6 .sc{padding:40px 50px}
 .arch-diagram{flex:1;display:flex;align-items:center;justify-content:center;position:relative}
 .arch-wrap{position:relative;width:100%;max-width:1100px}
-#arch-svg{width:100%;height:360px}
+#arch-svg{width:100%;height:410px}
 .arch-node{opacity:0}
 .arch-pills{display:flex;gap:12px;justify-content:center;margin-top:20px;flex-wrap:wrap}
 
@@ -621,7 +621,7 @@ canvas#particles{position:fixed;inset:0;z-index:0;pointer-events:none;opacity:.1
   <div class="ov">Phase 4</div>
   <h2 class="stitle">Two-Stage Model Architecture</h2>
   <div class="arch-diagram" style="flex:1;position:relative;margin-top:16px">
-    <svg id="arch-svg" viewBox="0 0 1100 360" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:100%">
+    <svg id="arch-svg" viewBox="0 0 1100 420" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:100%">
       <!-- Arrows (drawn before nodes so nodes appear on top) -->
       <defs><marker id="arr" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="rgba(255,255,255,0.25)"/></marker><marker id="arrt" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L0,6 L8,3 z" fill="var(--teal)"/></marker></defs>
       <!-- Input -> XGB -->
@@ -629,14 +629,11 @@ canvas#particles{position:fixed;inset:0;z-index:0;pointer-events:none;opacity:.1
       <!-- XGB -> Direction -->
       <line id="a2" x1="290" y1="165" x2="700" y2="165" stroke="rgba(74,158,255,0.4)" stroke-width="1.5" marker-end="url(#arr)" opacity="0"/>
       <!-- XGB -> OOF -->
-      <line id="a3" x1="170" y1="200" x2="170" y2="250" stroke="rgba(255,255,255,0.2)" stroke-width="1.5" marker-end="url(#arr)" opacity="0"/>
-      <!-- OOF -> Meta -->
-      <line id="a4" x1="170" y1="315" x2="170" y2="365" stroke="rgba(255,255,255,0.2)" stroke-width="1.5" marker-end="url(#arr)" opacity="0"/>
-      <!-- Waiting extra space: using 5-step arch, let's re-lay. -->
+      <line id="a3" x1="170" y1="200" x2="170" y2="248" stroke="rgba(255,255,255,0.2)" stroke-width="1.5" marker-end="url(#arr)" opacity="0"/>
       <!-- Meta -> Prob -->
-      <line id="a5" x1="290" y1="295" x2="680" y2="295" stroke="rgba(0,229,198,0.4)" stroke-width="1.5" marker-end="url(#arrt)" opacity="0"/>
+      <line id="a5" x1="300" y1="306" x2="680" y2="306" stroke="rgba(0,229,198,0.4)" stroke-width="1.5" marker-end="url(#arrt)" opacity="0"/>
       <!-- Prob -> Weights -->
-      <line id="a6" x1="810" y1="325" x2="810" y2="365" stroke="rgba(0,229,198,0.5)" stroke-width="1.5" marker-end="url(#arrt)" opacity="0"/>
+      <line id="a6" x1="810" y1="334" x2="810" y2="356" stroke="rgba(0,229,198,0.5)" stroke-width="1.5" marker-end="url(#arrt)" opacity="0"/>
 
       <!-- Row 1: Input Features -->
       <g id="n-input" class="arch-node">
@@ -655,42 +652,55 @@ canvas#particles{position:fixed;inset:0;z-index:0;pointer-events:none;opacity:.1
 
       <!-- Direction output -->
       <g id="n-dir" class="arch-node">
-        <rect x="700" y="138" width="200" height="54" rx="8" fill="rgba(0,229,198,0.1)" stroke="rgba(0,229,198,0.4)" stroke-width="1.5"/>
+        <rect x="700" y="136" width="220" height="62" rx="8" fill="rgba(0,229,198,0.1)" stroke="rgba(0,229,198,0.4)" stroke-width="1.5"/>
         <text x="800" y="158" fill="var(--teal)" font-size="11" font-family="JetBrains Mono" text-anchor="middle" font-weight="600">Direction Signal</text>
-        <text x="800" y="175" fill="#8b8f98" font-size="9" font-family="JetBrains Mono" text-anchor="middle">Long (1) / Short (−1)</text>
+        <rect id="dir-long-pill" x="718" y="166" width="82" height="20" rx="10" fill="rgba(0,229,198,0.16)" stroke="rgba(0,229,198,0.45)" opacity="0"/>
+        <text id="dir-long-t" x="759" y="179" fill="#00e5c6" font-size="9" font-family="JetBrains Mono" text-anchor="middle" opacity="0">Long (1)</text>
+        <rect id="dir-short-pill" x="820" y="166" width="82" height="20" rx="10" fill="rgba(255,92,92,0.14)" stroke="rgba(255,92,92,0.4)" opacity="0"/>
+        <text id="dir-short-t" x="861" y="179" fill="#ff8b8b" font-size="9" font-family="JetBrains Mono" text-anchor="middle" opacity="0">Short (-1)</text>
       </g>
 
       <!-- OOF -->
       <g id="n-oof" class="arch-node">
-        <rect x="60" y="210" width="220" height="50" rx="8" fill="rgba(255,215,0,0.06)" stroke="rgba(255,215,0,0.2)" stroke-width="1"/>
-        <text x="170" y="232" fill="#ffd700" font-size="10" font-family="JetBrains Mono" text-anchor="middle">OOF Predictions</text>
-        <text x="170" y="248" fill="#484d58" font-size="9" font-family="JetBrains Mono" text-anchor="middle">"Was the primary correct?"</text>
+        <rect x="60" y="206" width="220" height="52" rx="8" fill="rgba(255,215,0,0.06)" stroke="rgba(255,215,0,0.2)" stroke-width="1"/>
+        <text x="170" y="228" fill="#ffd700" font-size="10" font-family="JetBrains Mono" text-anchor="middle">OOF Predictions</text>
+        <text x="170" y="244" fill="#484d58" font-size="9" font-family="JetBrains Mono" text-anchor="middle">"Was the primary correct?"</text>
       </g>
 
       <!-- Arrow OOF -> Meta (vertical) -->
-      <line id="a4b" x1="170" y1="262" x2="170" y2="260" stroke="rgba(255,255,255,0.2)" stroke-width="1.5" marker-end="url(#arr)" opacity="0"/>
+      <line id="a4b" x1="170" y1="258" x2="170" y2="272" stroke="rgba(255,255,255,0.2)" stroke-width="1.5" marker-end="url(#arr)" opacity="0"/>
 
       <!-- Meta model -->
       <g id="n-meta" class="arch-node">
-        <rect x="40" y="263" width="260" height="65" rx="8" fill="rgba(255,215,0,0.1)" stroke="rgba(255,215,0,0.45)" stroke-width="1.5"/>
-        <text x="170" y="285" fill="#ffd700" font-size="12" font-family="JetBrains Mono" text-anchor="middle" font-weight="600">Random Forest — Meta Model</text>
-        <text x="170" y="301" fill="#8b8f98" font-size="9" font-family="JetBrains Mono" text-anchor="middle">500 trees · max_depth=6 · OOF targets</text>
-        <text x="170" y="315" fill="#555a64" font-size="9" font-family="JetBrains Mono" text-anchor="middle">27,760 correct / 19,867 incorrect (OOF)</text>
+        <rect x="40" y="272" width="260" height="68" rx="8" fill="rgba(255,215,0,0.1)" stroke="rgba(255,215,0,0.45)" stroke-width="1.5"/>
+        <text x="170" y="294" fill="#ffd700" font-size="12" font-family="JetBrains Mono" text-anchor="middle" font-weight="600">Random Forest — Meta Model</text>
+        <text x="170" y="311" fill="#8b8f98" font-size="9" font-family="JetBrains Mono" text-anchor="middle">500 trees · max_depth=6 · OOF targets</text>
+        <text x="170" y="326" fill="#555a64" font-size="9" font-family="JetBrains Mono" text-anchor="middle">27,760 correct / 19,867 incorrect (OOF)</text>
       </g>
 
       <!-- Meta prob output -->
       <g id="n-prob" class="arch-node">
-        <rect x="680" y="268" width="260" height="52" rx="8" fill="rgba(0,229,198,0.08)" stroke="rgba(0,229,198,0.3)" stroke-width="1.5"/>
-        <text x="810" y="290" fill="var(--teal)" font-size="11" font-family="JetBrains Mono" text-anchor="middle" font-weight="600">Meta Conviction Prob</text>
-        <text x="810" y="306" fill="#8b8f98" font-size="9" font-family="JetBrains Mono" text-anchor="middle">0.49 threshold · 48.5% positions retained</text>
+        <rect x="680" y="276" width="260" height="58" rx="8" fill="rgba(0,229,198,0.08)" stroke="rgba(0,229,198,0.3)" stroke-width="1.5"/>
+        <text x="810" y="296" fill="var(--teal)" font-size="11" font-family="JetBrains Mono" text-anchor="middle" font-weight="600">Meta Conviction Probability</text>
+        <rect x="722" y="306" width="176" height="8" rx="4" fill="rgba(255,255,255,.08)"/>
+        <rect id="meta-prob-bar" x="722" y="306" width="0" height="8" rx="4" fill="url(#grad-prob)"/>
+        <text id="meta-prob-live" x="810" y="327" fill="#8b8f98" font-size="9" font-family="JetBrains Mono" text-anchor="middle">threshold = 0.49</text>
       </g>
 
       <!-- Final weights -->
       <g id="n-wts" class="arch-node">
-        <rect x="680" y="345" width="260" height="50" rx="8" fill="rgba(0,229,198,0.18)" stroke="var(--teal)" stroke-width="2"/>
-        <text x="810" y="366" fill="var(--teal)" font-size="12" font-family="JetBrains Mono" text-anchor="middle" font-weight="600">Final Position Weights</text>
-        <text x="810" y="382" fill="#8b8f98" font-size="9" font-family="JetBrains Mono" text-anchor="middle">Half-Kelly sizing · 5% name cap · top decile</text>
+        <rect x="680" y="356" width="260" height="52" rx="8" fill="rgba(0,229,198,0.18)" stroke="var(--teal)" stroke-width="2"/>
+        <text x="810" y="376" fill="var(--teal)" font-size="12" font-family="JetBrains Mono" text-anchor="middle" font-weight="600">Final Position Weights</text>
+        <rect x="722" y="385" width="176" height="7" rx="3.5" fill="rgba(255,255,255,.08)"/>
+        <rect id="wts-retain-fill" x="722" y="385" width="0" height="7" rx="3.5" fill="rgba(0,229,198,.9)"/>
+        <text x="810" y="404" fill="#8b8f98" font-size="9" font-family="JetBrains Mono" text-anchor="middle">Half-Kelly · 5% cap · retained 48.5%</text>
       </g>
+      <defs>
+        <linearGradient id="grad-prob" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0%" stop-color="#4a9eff"/>
+          <stop offset="100%" stop-color="#00e5c6"/>
+        </linearGradient>
+      </defs>
     </svg>
   </div>
   <div class="arch-pills">
@@ -1290,6 +1300,13 @@ function preReset(i){
     // s5-right children slide from right
     sl.querySelectorAll('.s5-right>*').forEach(el=>gsap.set(el,{opacity:0,x:20,y:0}));
   }
+  if(i===5){
+    gsap.set('#dir-long-pill,#dir-short-pill,#dir-long-t,#dir-short-t',{opacity:0,scale:1});
+    gsap.set('#meta-prob-bar',{attr:{width:0}});
+    gsap.set('#wts-retain-fill',{attr:{width:0}});
+    const gate=document.getElementById('meta-prob-live');
+    if(gate)gate.textContent='threshold = 0.49';
+  }
   if(i===6){
     const mb=sl.querySelectorAll('.meta-bar .meta-correct,.meta-bar .meta-wrong');
     mb.forEach(el=>el.style.width='0%');
@@ -1480,13 +1497,26 @@ function e6(){
     .to('#a2',{opacity:1,duration:.3},.8)
     .to('#a3',{opacity:1,duration:.3},.85)
     .fromTo('#'+nodes[2],{opacity:0,scale:.8,x:15},{opacity:1,scale:1,x:0,duration:.35},.95)
+    .call(()=>{
+      gsap.to('#dir-long-pill,#dir-long-t,#dir-short-pill,#dir-short-t',{opacity:1,stagger:.08,duration:.2});
+      gsap.fromTo('#dir-long-pill',{scale:1},{scale:1.06,repeat:4,yoyo:true,duration:.16,transformOrigin:'center center'});
+      gsap.fromTo('#dir-short-pill',{scale:1},{scale:1.04,repeat:4,yoyo:true,duration:.16,delay:.08,transformOrigin:'center center'});
+    },null,1.05)
     .fromTo('#'+nodes[3],{opacity:0,scale:.8,y:10},{opacity:1,scale:1,y:0,duration:.35},1.05)
     .to('#a4b',{opacity:1,duration:.25},1.3)
     .to('#'+nodes[4],{opacity:1,scale:1,duration:.4,ease:'back.out'},1.4)
     .to('#a5',{opacity:1,duration:.3},1.7)
     .fromTo('#'+nodes[5],{opacity:0,scale:.8,x:15},{opacity:1,scale:1,x:0,duration:.35},1.85)
+    .call(()=>{
+      gsap.to('#meta-prob-bar',{attr:{width:86},duration:.7,ease:'power2.out'});
+      const gate=document.getElementById('meta-prob-live');
+      if(gate)gate.textContent='gate @ 0.49 -> 48.5% retained';
+    },null,1.95)
     .to('#a6',{opacity:1,duration:.25},2.05)
     .to('#'+nodes[6],{opacity:1,scale:1,duration:.4,ease:'back.out'},2.15)
+    .call(()=>{
+      gsap.to('#wts-retain-fill',{attr:{width:85},duration:.65,ease:'power2.out'});
+    },null,2.2)
     .to('#s6 .arch-pills .pill',{opacity:1,scale:1,stagger:.1,duration:.4},2.5);
 }
 
