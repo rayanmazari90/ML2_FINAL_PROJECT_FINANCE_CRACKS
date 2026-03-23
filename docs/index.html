@@ -270,6 +270,29 @@ canvas#particles{position:fixed;inset:0;z-index:0;pointer-events:none;opacity:.1
 .chart-wrap{background:var(--bg-card);border:1px solid var(--border);border-radius:9px;padding:14px}
 .chart-title{font-family:var(--font-m);font-size:.65rem;letter-spacing:2px;text-transform:uppercase;color:var(--text-dim);margin-bottom:10px}
 .s9-right{display:flex;flex-direction:column;gap:12px}
+.figure-preview{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;overflow:hidden}
+.expandable-figure{width:100%;padding:0;border:0;background:transparent;cursor:zoom-in;text-align:left;position:relative}
+.nb-curve-img{width:100%;max-height:220px;display:block;border-radius:7px;border:1px solid var(--border);object-fit:contain}
+.expand-hint{
+  position:absolute;right:8px;bottom:8px;padding:3px 8px;border-radius:12px;
+  background:rgba(6,8,13,.86);border:1px solid var(--border);
+  color:var(--text-secondary);font-family:var(--font-m);font-size:.56rem;letter-spacing:.7px;
+}
+.expandable-figure:hover .expand-hint{color:var(--teal);border-color:rgba(0,229,198,.25)}
+#img-lightbox{
+  position:fixed;inset:0;z-index:3000;background:rgba(0,0,0,.92);
+  display:none;align-items:center;justify-content:center;padding:26px;
+}
+#img-lightbox.open{display:flex}
+#img-lightbox img{
+  width:min(96vw,1400px);height:min(88vh,900px);object-fit:contain;
+  border:1px solid var(--border-bright);border-radius:8px;background:#0b1020;
+}
+#img-lightbox-close{
+  position:fixed;top:16px;right:18px;padding:6px 10px;border-radius:6px;
+  border:1px solid var(--border-bright);background:rgba(12,18,32,.9);color:var(--text-primary);
+  font-family:var(--font-m);font-size:.65rem;letter-spacing:.8px;cursor:pointer;
+}
 
 /* ── S10 DASHBOARD ── */
 #s10{background:radial-gradient(ellipse at 100% 0%,rgba(0,229,198,.04) 0%,transparent 60%)}
@@ -287,6 +310,10 @@ canvas#particles{position:fixed;inset:0;z-index:0;pointer-events:none;opacity:.1
 .guardrail-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .gr-item{background:var(--bg-card);border:1px solid var(--border);border-radius:7px;padding:9px 10px;font-family:var(--font-m);font-size:.62rem;color:var(--text-secondary);display:flex;align-items:center;gap:6px}
 .gr-icon{color:var(--teal)}
+.pm-outcome-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.pm-outcome{background:var(--bg-card);border:1px solid var(--border);border-radius:7px;padding:9px 10px}
+.pm-outcome .val{font-family:var(--font-m);font-size:.9rem;font-weight:600}
+.pm-outcome .lbl{font-size:.6rem;color:var(--text-dim);margin-top:2px}
 
 /* ── S11 SPOTLIGHT ── */
 .spotlight-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;flex:1;margin-top:16px}
@@ -363,6 +390,10 @@ canvas#particles{position:fixed;inset:0;z-index:0;pointer-events:none;opacity:.1
 <div id="nav-dots"></div>
 <div id="slide-counter">01 / 13</div>
 <div id="hint"><span class="key">←</span><span class="key">→</span> navigate</div>
+<div id="img-lightbox" aria-hidden="true">
+  <button id="img-lightbox-close" type="button">Close (Esc)</button>
+  <img id="img-lightbox-img" src="" alt="Expanded chart view"/>
+</div>
 
 <!-- ═══════════════════════════════════════════════════
   SLIDE 1 — TITLE
@@ -846,18 +877,24 @@ canvas#particles{position:fixed;inset:0;z-index:0;pointer-events:none;opacity:.1
         </div>
       </div>
     </div>
-    <!-- Monthly Chart -->
+    <!-- Notebook backtest visuals -->
     <div class="s9-right">
       <div class="chart-wrap" style="flex:1">
-        <div class="chart-title">Mean return by position entry month (8 rebalance waves)</div>
-        <canvas id="monthly-chart" style="max-height:200px"></canvas>
+        <div class="chart-title">Strategy vs S&amp;P 500 — Equity Curve &amp; Drawdown (Net of Costs)</div>
+        <div class="figure-preview">
+          <button class="expandable-figure" type="button" data-full="assets/equity_curve_strategy_vs_sp500.png" aria-label="Expand equity curve chart">
+            <img class="nb-curve-img" src="assets/equity_curve_strategy_vs_sp500.png" alt="Strategy vs S&P 500 equity curve and drawdown from notebook output"/>
+            <span class="expand-hint">CLICK TO EXPAND</span>
+          </button>
+        </div>
       </div>
-      <div class="card-sm" style="padding:12px">
-        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;text-align:center">
-          <div><div style="font-family:var(--font-m);font-size:.75rem;color:var(--teal)">57.1%</div><div style="font-size:.62rem;color:var(--text-dim)">Months Positive</div></div>
-          <div><div style="font-family:var(--font-m);font-size:.75rem;color:var(--blue)">16.5%</div><div style="font-size:.62rem;color:var(--text-dim)">Ann. Volatility</div></div>
-          <div><div style="font-family:var(--font-m);font-size:.75rem;color:var(--gold)">0.37</div><div style="font-size:.62rem;color:var(--text-dim)">Calmar Ratio</div></div>
-          <div><div style="font-family:var(--font-m);font-size:.75rem;color:var(--text-secondary)">+1.32%</div><div style="font-size:.62rem;color:var(--text-dim)">Avg return (scored)</div></div>
+      <div class="chart-wrap" style="padding:10px">
+        <div class="chart-title">Strategy vs S&amp;P 500 — Relative Diagnostics Panel</div>
+        <div class="figure-preview">
+          <button class="expandable-figure" type="button" data-full="assets/strategy_benchmark_diagnostics.png" aria-label="Expand diagnostics chart">
+            <img class="nb-curve-img" src="assets/strategy_benchmark_diagnostics.png" alt="Strategy versus S&P diagnostics panel including cumulative returns, rolling Sharpe, monthly returns, and metric comparison"/>
+            <span class="expand-hint">CLICK TO EXPAND</span>
+          </button>
         </div>
       </div>
     </div>
@@ -872,17 +909,26 @@ canvas#particles{position:fixed;inset:0;z-index:0;pointer-events:none;opacity:.1
 <div class="sc">
   <div class="ov">The Product</div>
   <h2 class="stitle">Portfolio Manager Decision Engine</h2>
-  <p class="ssub">Actionable intelligence for the next rebalance — October 2025 signal</p>
+  <p class="ssub">Actionable intelligence for the next rebalance — conviction is confidence, weight is the capped allocation decision</p>
   <div class="s10-grid">
     <div class="ledger-wrap">
       <table class="ledger-table" id="ledger">
         <thead>
-          <tr><th>#</th><th>Ticker</th><th>Sector</th><th>Dir</th><th>Conviction</th><th style="text-align:right">Weight</th><th style="text-align:right;color:var(--teal)">Take Profit</th><th style="text-align:right;color:var(--coral)">Stop Loss</th></tr>
+          <tr><th>#</th><th>Ticker</th><th>Sector</th><th>Dir</th><th>Meta Conv.</th><th style="text-align:right">Weight</th><th style="text-align:right;color:var(--teal)">Take Profit</th><th style="text-align:right;color:var(--coral)">Stop Loss</th></tr>
         </thead>
         <tbody id="ledger-body"></tbody>
       </table>
     </div>
     <div class="s10-sidebar">
+      <div class="card-sm">
+        <div style="font-family:var(--font-m);font-size:.62rem;letter-spacing:2px;text-transform:uppercase;color:var(--text-dim);margin-bottom:10px">Decision Outcomes (Notebook, Test Set)</div>
+        <div class="pm-outcome-grid">
+          <div class="pm-outcome"><div class="val" style="color:var(--teal)">+10.45%</div><div class="lbl">Avg Winner</div></div>
+          <div class="pm-outcome"><div class="val" style="color:var(--coral)">−7.90%</div><div class="lbl">Avg Loser</div></div>
+          <div class="pm-outcome"><div class="val" style="color:var(--teal)">+242.84%</div><div class="lbl">Best Trade (SNDK)</div></div>
+          <div class="pm-outcome"><div class="val" style="color:var(--coral)">−59.55%</div><div class="lbl">Worst Trade (SMCI)</div></div>
+        </div>
+      </div>
       <div class="card-sm">
         <div style="font-family:var(--font-m);font-size:.62rem;letter-spacing:2px;text-transform:uppercase;color:var(--text-dim);margin-bottom:10px">Portfolio Sector Allocation</div>
         <canvas id="sector-donut" style="max-height:160px"></canvas>
@@ -954,7 +1000,7 @@ canvas#particles{position:fixed;inset:0;z-index:0;pointer-events:none;opacity:.1
       <div class="tpsl-wrap">
         <div class="tpsl-title">Take Profit / Stop Loss Range</div>
         <div class="tpsl-bar"><div class="tpsl-fill" style="left:0;width:100%;background:linear-gradient(90deg,rgba(255,92,92,.3),rgba(0,229,198,.3))"></div><div class="tpsl-fill" style="left:45%;width:10px;height:100%;background:white;border-radius:5px;opacity:.8"></div></div>
-        <div class="tpsl-labels"><span style="color:var(--coral)">SL: −2σ√T</span><span style="color:var(--text-dim)">Entry</span><span style="color:var(--teal)">TP: +2σ√T</span></div>
+        <div class="tpsl-labels"><span style="color:var(--coral)">SL $63.16</span><span style="color:var(--text-dim)">Current price</span><span style="color:var(--teal)">TP $78.65</span></div>
       </div>
       <div>
         <div class="shap-title">Key Signal Drivers</div>
@@ -980,7 +1026,7 @@ canvas#particles{position:fixed;inset:0;z-index:0;pointer-events:none;opacity:.1
       <div class="tpsl-wrap">
         <div class="tpsl-title">Take Profit / Stop Loss Range</div>
         <div class="tpsl-bar"><div class="tpsl-fill" style="left:0;width:100%;background:linear-gradient(90deg,rgba(255,92,92,.3),rgba(0,229,198,.3))"></div><div class="tpsl-fill" style="left:45%;width:10px;height:100%;background:white;border-radius:5px;opacity:.8"></div></div>
-        <div class="tpsl-labels"><span style="color:var(--coral)">SL: −2σ√T</span><span style="color:var(--text-dim)">Entry</span><span style="color:var(--teal)">TP: +2σ√T</span></div>
+        <div class="tpsl-labels"><span style="color:var(--coral)">SL $35.27</span><span style="color:var(--text-dim)">Current price</span><span style="color:var(--teal)">TP $44.16</span></div>
       </div>
       <div>
         <div class="shap-title">Key Signal Drivers</div>
@@ -1097,10 +1143,41 @@ function updateCounter(){
 }
 
 /* ─── KEYBOARD ─── */
+let lightboxOpen=false;
 document.addEventListener('keydown', e=>{
+  if(lightboxOpen){
+    if(e.key==='Escape'){e.preventDefault();closeLightbox();}
+    return;
+  }
   if(['ArrowRight','ArrowDown',' '].includes(e.key)){e.preventDefault();go(cur+1,1);}
   else if(['ArrowLeft','ArrowUp'].includes(e.key)){e.preventDefault();go(cur-1,-1);}
 });
+
+/* ─── IMAGE LIGHTBOX ─── */
+const lb=document.getElementById('img-lightbox');
+const lbImg=document.getElementById('img-lightbox-img');
+const lbClose=document.getElementById('img-lightbox-close');
+function openLightbox(src, alt='Expanded chart view'){
+  lbImg.src=src;
+  lbImg.alt=alt;
+  lb.classList.add('open');
+  lb.setAttribute('aria-hidden','false');
+  lightboxOpen=true;
+}
+function closeLightbox(){
+  lb.classList.remove('open');
+  lb.setAttribute('aria-hidden','true');
+  lbImg.src='';
+  lightboxOpen=false;
+}
+document.querySelectorAll('.expandable-figure').forEach(btn=>{
+  btn.addEventListener('click',()=>{
+    const im=btn.querySelector('img');
+    openLightbox(btn.dataset.full, im ? im.alt : 'Expanded chart view');
+  });
+});
+lbClose.addEventListener('click',closeLightbox);
+lb.addEventListener('click',e=>{if(e.target===lb)closeLightbox();});
 
 /* ─── PARTICLES ─── */
 (function(){
@@ -1482,19 +1559,19 @@ function e9(){
 /* SLIDE 10 */
 const ledgerData = [
   {r:1,tk:'DUK',sec:'Utilities',conv:.7204,wt:'5.00%',tp:'$127.29',sl:'$99.65'},
-  {r:2,tk:'CMS',sec:'Utilities',conv:.7193,wt:'5.00%',tp:'$58.12',sl:'$45.44'},
-  {r:3,tk:'NI',sec:'Utilities',conv:.7190,wt:'5.00%',tp:'$33.81',sl:'$26.44'},
-  {r:4,tk:'LNT',sec:'Utilities',conv:.7187,wt:'5.00%',tp:'$58.70',sl:'$45.90'},
-  {r:5,tk:'EVRG',sec:'Utilities',conv:.7186,wt:'5.00%',tp:'$63.44',sl:'$49.60'},
-  {r:6,tk:'CNP',sec:'Utilities',conv:.7162,wt:'5.00%',tp:'$34.10',sl:'$26.66'},
-  {r:7,tk:'WEC',sec:'Utilities',conv:.7152,wt:'5.00%',tp:'$101.58',sl:'$79.44'},
-  {r:8,tk:'ED',sec:'Utilities',conv:.7128,wt:'5.00%',tp:'$108.90',sl:'$85.14'},
-  {r:9,tk:'PNW',sec:'Utilities',conv:.7126,wt:'5.00%',tp:'$84.66',sl:'$66.18'},
-  {r:10,tk:'AEE',sec:'Utilities',conv:.7098,wt:'5.00%',tp:'$98.22',sl:'$76.80'},
-  {r:11,tk:'PPL',sec:'Utilities',conv:.7081,wt:'5.00%',tp:'$38.44',sl:'$30.04'},
-  {r:12,tk:'D',sec:'Utilities',conv:.7074,wt:'5.00%',tp:'$55.88',sl:'$43.68'},
-  {r:13,tk:'WM',sec:'Industrials',conv:.6892,wt:'3.80%',tp:'$234.10',sl:'$182.96'},
-  {r:14,tk:'NEE',sec:'Utilities',conv:.6851,wt:'3.20%',tp:'$78.44',sl:'$61.32'},
+  {r:2,tk:'CMS',sec:'Utilities',conv:.7193,wt:'5.00%',tp:'$78.65',sl:'$63.16'},
+  {r:3,tk:'NI',sec:'Utilities',conv:.7190,wt:'5.00%',tp:'$44.16',sl:'$35.27'},
+  {r:4,tk:'LNT',sec:'Utilities',conv:.7187,wt:'5.00%',tp:'$68.98',sl:'$56.06'},
+  {r:5,tk:'EVRG',sec:'Utilities',conv:.7186,wt:'5.00%',tp:'$71.63',sl:'$59.83'},
+  {r:6,tk:'XEL',sec:'Utilities',conv:.7166,wt:'5.00%',tp:'$77.61',sl:'$61.01'},
+  {r:7,tk:'CNP',sec:'Utilities',conv:.7162,wt:'5.00%',tp:'$37.36',sl:'$29.84'},
+  {r:8,tk:'WEC',sec:'Utilities',conv:.7152,wt:'5.00%',tp:'$114.03',sl:'$92.38'},
+  {r:9,tk:'ED',sec:'Utilities',conv:.7128,wt:'5.00%',tp:'$111.31',sl:'$85.17'},
+  {r:10,tk:'PNW',sec:'Utilities',conv:.7126,wt:'5.00%',tp:'$99.49',sl:'$78.41'},
+  {r:11,tk:'AEE',sec:'Utilities',conv:.7107,wt:'5.00%',tp:'$108.57',sl:'$87.43'},
+  {r:12,tk:'MRSH',sec:'Financials',conv:.7037,wt:'5.00%',tp:'$258.62',sl:'$208.95'},
+  {r:13,tk:'EXC',sec:'Utilities',conv:.7034,wt:'5.00%',tp:'$47.54',sl:'$37.82'},
+  {r:14,tk:'VZ',sec:'Communication Services',conv:.7031,wt:'5.00%',tp:'$44.54',sl:'$36.13'},
 ];
 function e10(){
   const tl=gsap.timeline();
@@ -1525,8 +1602,8 @@ function e10(){
     makeChart('sector-donut',{
       type:'doughnut',
       data:{
-        labels:['Utilities','Consumer Staples','Healthcare','Industrials','Financials','Real Estate','Other'],
-        datasets:[{data:[30,16,15,12,11,9,7],backgroundColor:['#4a9eff','#48c78e','#ff5c5c','#ffd700','#00e5c6','#ff9500','#8b8f98'],borderWidth:0,hoverOffset:5}]
+        labels:['Utilities','Financials','Communication Services'],
+        datasets:[{data:[85.7,7.1,7.1],backgroundColor:['#4a9eff','#00e5c6','#ffd700'],borderWidth:0,hoverOffset:5}]
       },
       options:{responsive:true,maintainAspectRatio:true,cutout:'55%',
         plugins:{legend:{display:true,position:'bottom',labels:{font:{family:'JetBrains Mono',size:9},boxWidth:10,padding:8}}},
