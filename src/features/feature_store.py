@@ -203,21 +203,24 @@ def compute_fundamental_features(merged: pd.DataFrame) -> pd.DataFrame:
         den = den.replace(0, np.nan)
         return num / den
 
-    # P/E: approximate from price and net_income/equity if EPS unavailable
-    # (true EPS = net_income / shares, but shares aren't in edgartools;
-    #  use net_income directly as a proxy ranking signal)
-    df["pe_trailing"] = _safe_div(price * total_assets, net_income)
-    df["pb"] = _safe_div(price * total_assets, equity)
+    # Without shares_outstanding we cannot compute per-share ratios (P/E, P/B).
+    # Instead we use asset-scaled ratios that work as cross-sectional ranking
+    # signals without needing share count or market cap.
+    df["earnings_yield"] = _safe_div(net_income, total_assets)
+    df["book_to_assets"] = _safe_div(equity, total_assets)
     df["roe"] = _safe_div(net_income, equity)
     df["roa"] = _safe_div(net_income, total_assets)
     df["debt_equity"] = _safe_div(total_liab, equity)
-    df["gross_margin"] = _safe_div(revenue - net_income, revenue)
     df["net_margin"] = _safe_div(net_income, revenue)
     df["ocf_to_assets"] = _safe_div(ocf, total_assets)
+    df["ocf_to_debt"] = _safe_div(ocf, total_liab)
+    df["leverage"] = _safe_div(total_assets, equity)
 
+    # YoY growth: duration metrics come from 10-K only (one row per year),
+    # so pct_change(1) gives year-over-year growth.
     for col in ["revenue", "net_income"]:
         if col in df.columns:
-            df[f"{col}_growth_yoy"] = df.groupby("ticker")[col].pct_change(4)
+            df[f"{col}_growth_yoy"] = df.groupby("ticker")[col].pct_change(1)
 
     return df
 
@@ -311,7 +314,7 @@ def cross_sectional_zscore(
         # Winsorise within each cross-section
         def _winz_zscore(g: pd.Series) -> pd.Series:
             vals = g.values.astype(float)
-            clipped = mstats.winsorize(vals, limits=[0.01, 0.01])
+            clipped = np.array(mstats.winsorize(vals, limits=[0.01, 0.01]))
             mu = np.nanmean(clipped)
             sigma = np.nanstd(clipped, ddof=0)
             if sigma == 0 or np.isnan(sigma):
@@ -390,6 +393,19 @@ def run_feature_pipeline(
     merged = pit_asof_join(feature_dates, fundamentals)
     merged = merged.merge(tech, on=["date", "ticker"], how="left")
 
+    # Drop rows where no prior filing was available (pre-earliest-filing dates).
+    # These have NaN for all fundamental columns and cannot produce valid ratios.
+    fund_cols = ["revenue", "net_income", "total_assets", "total_liabilities",
+                 "stockholders_equity", "operating_cash_flow"]
+    fund_present = [c for c in fund_cols if c in merged.columns]
+    if fund_present:
+        before = len(merged)
+        merged = merged.dropna(subset=fund_present, how="all")
+        dropped = before - len(merged)
+        if dropped:
+            print(f"  Dropped {dropped:,} rows with no fundamental coverage "
+                  f"({dropped / before:.1%} of total)")
+
     print("[Phase 2] Computing fundamental ratios …")
     merged = compute_fundamental_features(merged)
 
@@ -400,18 +416,9 @@ def run_feature_pipeline(
     feature_cols = [c for c in merged.columns
                     if c not in exclude and merged[c].dtype in ("float64", "float32", "int64")]
 
-    # Fractional differencing
+    # Fractional differencing — disabled.  All features are already
+    # stationary (returns, ratios, z-scores), so d-values are 0.0.
     d_values: Dict[str, float] = {}
-    if cfg["features"]["preprocessing"].get("fractional_differencing"):
-        print("[Phase 2] Applying fractional differencing …")
-        non_ratio_cols = [c for c in feature_cols
-                          if not any(tag in c for tag in ("pe_", "pb", "roe", "roa",
-                                                          "margin", "debt_", "growth", "zscore",
-                                                          "rsi", "bb_", "amihud"))]
-        merged, d_values = fractional_difference(
-            merged, non_ratio_cols,
-            confidence=cfg["features"]["preprocessing"]["fracdiff_confidence"],
-        )
 
     # Cross-sectional z-score
     if cfg["features"]["preprocessing"].get("cross_sectional_zscore"):

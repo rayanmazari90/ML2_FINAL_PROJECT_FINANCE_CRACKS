@@ -53,9 +53,10 @@ _WIKI_URL = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
 def _read_wiki_tables():
     """Fetch Wikipedia S&P 500 tables, handling SSL + User-Agent issues."""
     import requests as _req
+    from io import StringIO
     resp = _req.get(_WIKI_URL, headers={"User-Agent": "Mozilla/5.0"}, timeout=30)
     resp.raise_for_status()
-    return pd.read_html(resp.text)
+    return pd.read_html(StringIO(resp.text))
 
 
 def _fetch_current_sp500() -> pd.DataFrame:
@@ -214,132 +215,257 @@ def fetch_pricing(
 
     df = pd.concat(frames, ignore_index=True)
     df["date"] = pd.to_datetime(df["date"])
+
+    # ── Filter corrupted / recycled tickers ──
+    # These are delisted S&P 500 ticker symbols that the data provider
+    # maps to unrelated penny stocks or OTC shells, producing nonsensical
+    # returns (e.g. 34,000x daily moves) that corrupt the entire pipeline.
+    _BAD_TICKERS = {
+        "BMC", "CBE", "COL", "CPWR", "GR", "MI",
+        "PTV", "RSH", "RX", "SLE", "STI", "SW", "TIE",
+    }
+    before = df["ticker"].nunique()
+    df = df[~df["ticker"].isin(_BAD_TICKERS)]
+    after = df["ticker"].nunique()
+    if before != after:
+        print(f"  Filtered {before - after} corrupted tickers: {_BAD_TICKERS & set(df['ticker'])}")
+
     return df.sort_values(["ticker", "date"]).reset_index(drop=True)
 
 
 # ──────────────────────────────────────────────────────────────
-# 3. Point-in-Time Fundamentals (edgartools)
+# 3. Point-in-Time Fundamentals (SEC EDGAR companyfacts API)
 # ──────────────────────────────────────────────────────────────
+
+def _fetch_cik_map() -> Dict[str, str]:
+    """Download the SEC ticker → CIK mapping (one-time, cached in memory)."""
+    import requests
+
+    url = "https://www.sec.gov/files/company_tickers.json"
+    headers = {"User-Agent": "QuantFramework research@university.edu"}
+    resp = requests.get(url, headers=headers, timeout=30)
+    resp.raise_for_status()
+    data = resp.json()
+    # Map uppercase ticker → zero-padded CIK string
+    return {
+        entry["ticker"].upper(): str(entry["cik_str"]).zfill(10)
+        for entry in data.values()
+    }
+
+
+# XBRL US-GAAP tags to extract, with fallbacks for tag name variations.
+# Each key becomes a column; values are tried in order until one is found.
+_XBRL_TAG_MAP: Dict[str, list] = {
+    "revenue": [
+        "Revenues",
+        "RevenueFromContractWithCustomerExcludingAssessedTax",
+        "RevenueFromContractWithCustomerIncludingAssessedTax",
+        "SalesRevenueNet",
+        "SalesRevenueGoodsNet",
+    ],
+    "net_income": ["NetIncomeLoss"],
+    "total_assets": ["Assets"],
+    "total_liabilities": ["Liabilities"],
+    "stockholders_equity": [
+        "StockholdersEquity",
+        "StockholdersEquityIncludingPortionAttributableToNoncontrollingInterest",
+    ],
+    "operating_cash_flow": [
+        "NetCashProvidedByUsedInOperatingActivities",
+        "NetCashProvidedByUsedInOperatingActivitiesContinuingOperations",
+    ],
+}
+
+
+def _parse_companyfacts(
+    ticker: str,
+    cik: str,
+    filing_types: tuple,
+    since_dt: pd.Timestamp,
+) -> list[dict]:
+    """Fetch and parse the companyfacts JSON for one ticker."""
+    import requests
+
+    url = f"https://data.sec.gov/api/xbrl/companyfacts/CIK{cik}.json"
+    headers = {"User-Agent": "QuantFramework research@university.edu"}
+    resp = requests.get(url, headers=headers, timeout=30)
+    resp.raise_for_status()
+    data = resp.json()
+
+    us_gaap = data.get("facts", {}).get("us-gaap", {})
+    if not us_gaap:
+        return []
+
+    # Build a dict: (form, end_date) → {metric: value, filed: date}
+    # so we can merge multiple tags into a single row per filing period.
+    filing_map: dict[tuple, dict] = {}
+    forms_set = set(filing_types)
+
+    for col_name, tag_candidates in _XBRL_TAG_MAP.items():
+        for tag in tag_candidates:
+            concept = us_gaap.get(tag)
+            if concept is None:
+                continue
+            facts = concept.get("units", {}).get("USD", [])
+            for fact in facts:
+                form = fact.get("form", "")
+                if form not in forms_set:
+                    continue
+                end = fact.get("end")
+                filed = fact.get("filed")
+                val = fact.get("val")
+                if end is None or filed is None or val is None:
+                    continue
+                if pd.Timestamp(filed) < since_dt:
+                    continue
+
+                key = (form, end)
+                if key not in filing_map:
+                    filing_map[key] = {
+                        "ticker": ticker,
+                        "fiscal_period_end": end,
+                        "sec_acceptance_date": filed,
+                        "form_type": form,
+                    }
+                # First tag candidate to populate a (key, metric) wins;
+                # later candidates fill gaps (e.g. Revenues covers 10-K
+                # pre-2018, RevenueFromContract... covers 10-Q and post-2018).
+                if col_name not in filing_map[key]:
+                    filing_map[key][col_name] = val
+
+    return list(filing_map.values())
+
 
 def fetch_pit_fundamentals(
     tickers: List[str],
     filing_types: tuple = ("10-K", "10-Q"),
-    n_periods: int = 8,
+    since: str = "2010-01-01",
+    max_workers: int = 8,
 ) -> pd.DataFrame:
     """
-    Pull key fundamental metrics from SEC EDGAR via *edgartools*,
-    preserving the filing_date as the point-in-time timestamp.
+    Pull key fundamental metrics from SEC EDGAR via the bulk
+    companyfacts API (one request per ticker).
 
-    Uses the standardised get_financials() API which maps ~2000 XBRL
-    tags to 95 consistent concepts across all companies.
+    For each ticker, fetches ALL historical XBRL data in a single
+    JSON response and extracts revenue, net income, total assets,
+    total liabilities, stockholders equity, and operating cash flow
+    for every 10-K and 10-Q filing back to *since*.
+
+    Parameters
+    ----------
+    tickers : list of ticker strings
+    filing_types : tuple of SEC form types to keep (default: 10-K and 10-Q)
+    since : earliest filing date to include (default: "2010-01-01")
+    max_workers : concurrent requests (default: 8, within SEC 10 req/s limit)
 
     Returns DataFrame:
         ticker | fiscal_period_end | sec_acceptance_date |
         form_type | revenue | net_income | total_assets |
         total_liabilities | stockholders_equity | operating_cash_flow
     """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    import time
+
+    since_dt = pd.Timestamp(since)
+
+    # Step 1: Get ticker → CIK mapping
+    print("  [SEC] Fetching ticker → CIK mapping …")
     try:
-        import edgar
-        from edgar import Company
-        edgar.set_identity("QuantFramework research@university.edu")
-    except ImportError:
-        warnings.warn(
-            "edgartools not installed – returning empty fundamentals frame.",
-            stacklevel=2,
-        )
+        cik_map = _fetch_cik_map()
+    except Exception as e:
+        warnings.warn(f"Failed to fetch CIK mapping: {e}", stacklevel=2)
         return pd.DataFrame()
-    except Exception:
-        pass
 
-    def _safe(fn, *args):
-        try:
-            return fn(*args)
-        except Exception:
-            return None
+    # Resolve CIKs for requested tickers
+    ticker_cik = {}
+    unmapped = []
+    for t in tickers:
+        cik = cik_map.get(t.upper())
+        if cik:
+            ticker_cik[t] = cik
+        else:
+            unmapped.append(t)
 
-    rows: list[dict] = []
+    if unmapped:
+        print(f"  [SEC] No CIK found for {len(unmapped)} tickers: "
+              f"{unmapped[:10]}{'…' if len(unmapped) > 10 else ''}")
+
+    # Step 2: Fetch companyfacts in parallel with rate limiting
+    print(f"  [SEC] Fetching companyfacts for {len(ticker_cik)} tickers "
+          f"(~{len(ticker_cik) // max_workers + 1}s) …")
+
+    all_rows: list[dict] = []
     failed: list[str] = []
+    completed = 0
 
-    for ticker in tickers:
-        try:
-            company = Company(ticker)
-            fin = company.get_financials()
-            if fin is None:
-                failed.append(ticker)
-                continue
+    def _fetch_one(ticker_cik_pair):
+        ticker, cik = ticker_cik_pair
+        return ticker, _parse_companyfacts(ticker, cik, filing_types, since_dt)
 
-            # Determine PIT date from the latest filing
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        futures = {}
+        for i, item in enumerate(ticker_cik.items()):
+            futures[pool.submit(_fetch_one, item)] = item[0]
+            # Throttle submission to stay under 10 req/sec
+            if (i + 1) % max_workers == 0:
+                time.sleep(1.0)
+
+        for future in as_completed(futures):
+            ticker = futures[future]
             try:
-                latest_filing = company.get_filings(form="10-K").latest()
-                filing_date = getattr(latest_filing, "filing_date", None)
-                period_end = getattr(latest_filing, "period_of_report", None)
-            except Exception:
-                filing_date = None
-                period_end = None
-
-            row = {
-                "ticker": ticker,
-                "fiscal_period_end": period_end,
-                "sec_acceptance_date": filing_date,
-                "form_type": "10-K",
-                "revenue": _safe(fin.get_revenue),
-                "net_income": _safe(fin.get_net_income),
-                "total_assets": _safe(fin.get_total_assets),
-                "total_liabilities": _safe(fin.get_total_liabilities),
-                "stockholders_equity": _safe(fin.get_stockholders_equity),
-                "operating_cash_flow": _safe(fin.get_operating_cash_flow),
-            }
-            rows.append(row)
-        except Exception as e:
-            failed.append(f"{ticker}({type(e).__name__})")
-            continue
+                _, rows = future.result()
+                all_rows.extend(rows)
+            except Exception as e:
+                failed.append(f"{ticker}({type(e).__name__})")
+            completed += 1
+            if completed % 100 == 0:
+                print(f"    … {completed}/{len(ticker_cik)} tickers done")
 
     if failed:
-        print(f"  [edgartools] Failed for {len(failed)} tickers: "
+        print(f"  [SEC] Failed for {len(failed)} tickers: "
               f"{failed[:10]}{'…' if len(failed) > 10 else ''}")
 
-    if not rows:
+    if not all_rows:
         return pd.DataFrame()
 
-    df = pd.DataFrame(rows)
+    df = pd.DataFrame(all_rows)
     for col in ["fiscal_period_end", "sec_acceptance_date"]:
         df[col] = pd.to_datetime(df[col], errors="coerce")
+
+    # Deduplicate: keep one row per (ticker, fiscal_period_end, form_type).
+    # Prefer the row with the most non-null metrics.
+    metric_cols = list(_XBRL_TAG_MAP.keys())
+    df["_n_metrics"] = df[metric_cols].notna().sum(axis=1)
+    df = df.sort_values("_n_metrics", ascending=False).drop_duplicates(
+        subset=["ticker", "fiscal_period_end", "form_type"],
+        keep="first",
+    ).drop(columns=["_n_metrics"])
+
+    df = df.sort_values(["ticker", "sec_acceptance_date"]).reset_index(drop=True)
+    print(f"  [SEC] Done: {len(df):,} filing rows for {df['ticker'].nunique()} tickers")
     return df
 
 
-def pit_asof_join(
-    feature_dates: pd.DataFrame,
-    fundamentals: pd.DataFrame,
+# Duration metrics (income statement / cash flow) are cumulative YTD in
+# 10-Qs, so we source them from 10-K only.  Instant metrics (balance
+# sheet) are point-in-time snapshots safe to use from any form type.
+_DURATION_COLS = ["revenue", "net_income", "operating_cash_flow"]
+_INSTANT_COLS = ["total_assets", "total_liabilities", "stockholders_equity"]
+
+
+def _asof_merge_per_ticker(
+    left: pd.DataFrame,
+    right: pd.DataFrame,
+    value_cols: list[str],
 ) -> pd.DataFrame:
-    """
-    For every (ticker, decision_date) in *feature_dates*, attach the
-    most recent fundamental row whose sec_acceptance_date <= decision_date.
-
-    Parameters
-    ----------
-    feature_dates : DataFrame with columns ['ticker', 'date']
-    fundamentals  : DataFrame from fetch_pit_fundamentals()
-
-    Returns
-    -------
-    Merged DataFrame.  Any fundamental column that violates PIT is NaN.
-    """
-    if fundamentals.empty:
-        return feature_dates
-
-    left = feature_dates.copy()
-    right = fundamentals.copy()
-
-    left["date"] = pd.to_datetime(left["date"], utc=True).dt.tz_localize(None)
-    right["sec_acceptance_date"] = pd.to_datetime(
-        right["sec_acceptance_date"], utc=True
-    ).dt.tz_localize(None)
-
-    left = left.dropna(subset=["date"])
+    """merge_asof per ticker, keeping only *value_cols* from the right side."""
+    right = right[["ticker", "sec_acceptance_date"] + value_cols].copy()
     right = right.dropna(subset=["sec_acceptance_date"])
 
-    # merge_asof requires the key column to be globally sorted.
-    # Merge per-ticker to guarantee sort order within each group.
+    # Align datetime resolution to avoid merge_asof dtype mismatch
+    left["date"] = left["date"].astype("datetime64[us]")
+    right["sec_acceptance_date"] = right["sec_acceptance_date"].astype("datetime64[us]")
+
     parts = []
     for ticker in left["ticker"].unique():
         l = left[left["ticker"] == ticker].sort_values("date")
@@ -359,8 +485,83 @@ def pit_asof_join(
     if not parts:
         return left
     merged = pd.concat(parts, ignore_index=True)
-    if "ticker_fund" in merged.columns:
-        merged.drop(columns=["ticker_fund"], inplace=True)
+    for col in ["ticker_fund", "sec_acceptance_date_fund"]:
+        if col in merged.columns:
+            merged.drop(columns=[col], inplace=True)
+    return merged
+
+
+def pit_asof_join(
+    feature_dates: pd.DataFrame,
+    fundamentals: pd.DataFrame,
+) -> pd.DataFrame:
+    """
+    For every (ticker, decision_date) in *feature_dates*, attach the
+    most recent fundamental row whose sec_acceptance_date <= decision_date.
+
+    Duration metrics (revenue, net_income, operating_cash_flow) are sourced
+    from 10-K filings only to avoid cumulative YTD distortion from 10-Qs.
+    Instant metrics (total_assets, total_liabilities, stockholders_equity)
+    use both 10-K and 10-Q for quarterly freshness.
+
+    Parameters
+    ----------
+    feature_dates : DataFrame with columns ['ticker', 'date']
+    fundamentals  : DataFrame from fetch_pit_fundamentals()
+
+    Returns
+    -------
+    Merged DataFrame.  Any fundamental column that violates PIT is NaN.
+    """
+    if fundamentals.empty:
+        return feature_dates
+
+    left = feature_dates.copy()
+    fund = fundamentals.copy()
+
+    left["date"] = pd.to_datetime(left["date"], utc=True).dt.tz_localize(None)
+    fund["sec_acceptance_date"] = pd.to_datetime(
+        fund["sec_acceptance_date"], utc=True
+    ).dt.tz_localize(None)
+
+    left = left.dropna(subset=["date"])
+
+    # Duration metrics: 10-K only (annual figures, no YTD mixing)
+    duration_present = [c for c in _DURATION_COLS if c in fund.columns]
+    annual = fund[fund["form_type"] == "10-K"].copy()
+
+    # Instant metrics: all form types (balance sheet snapshots)
+    instant_present = [c for c in _INSTANT_COLS if c in fund.columns]
+
+    # Merge duration metrics from 10-K
+    if duration_present and not annual.empty:
+        merged = _asof_merge_per_ticker(left, annual, duration_present)
+    else:
+        merged = left
+
+    # Merge instant metrics from all filings
+    if instant_present and not fund.empty:
+        merged = _asof_merge_per_ticker(merged, fund, instant_present)
+
+    # Keep sec_acceptance_date and form_type from the annual merge for PIT audit
+    if "sec_acceptance_date" not in merged.columns and not annual.empty:
+        merged = _asof_merge_per_ticker(
+            merged, annual[["ticker", "sec_acceptance_date", "form_type"]],
+            ["form_type"],
+        )
+
+    # Forward-fill per-metric gaps within each ticker.
+    # merge_asof picks the single best-matching filing row, but that row
+    # may be missing a metric that an earlier filing reported (e.g., a
+    # 10-Q that lacks total_liabilities when the prior 10-K had it).
+    # Propagating the last known value is PIT-safe: we only carry forward
+    # values that were already public at or before the decision date.
+    all_fund_cols = _DURATION_COLS + _INSTANT_COLS
+    fund_present = [c for c in all_fund_cols if c in merged.columns]
+    if fund_present:
+        merged = merged.sort_values(["ticker", "date"])
+        merged[fund_present] = merged.groupby("ticker")[fund_present].ffill()
+
     return merged
 
 

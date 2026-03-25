@@ -26,7 +26,7 @@ def rank_weighted_portfolio(
     cfg: dict,
 ) -> pd.Series:
     """
-    Build a dollar-neutral long/short portfolio from conviction scores.
+    Build a long-only (or long/short) portfolio from conviction scores.
 
     Parameters
     ----------
@@ -41,6 +41,7 @@ def rank_weighted_portfolio(
     pcfg = cfg["portfolio"]
     max_name = pcfg["max_single_name_pct"]
     max_sector = pcfg["max_sector_pct"]
+    long_only = pcfg.get("long_only", False)
 
     scores = scores.dropna()
     if scores.empty:
@@ -51,40 +52,46 @@ def rank_weighted_portfolio(
 
     if pcfg["long_leg"] == "top_decile":
         long_mask = ranked >= 0.9
+    elif pcfg["long_leg"] == "top_vigintile":
+        long_mask = ranked >= 0.95
     else:
         long_mask = ranked >= 0.8
 
-    if pcfg["short_leg"] == "bottom_decile":
-        short_mask = ranked <= 0.1
-    else:
-        short_mask = ranked <= 0.2
-
     weights = pd.Series(0.0, index=scores.index)
+
+    if not long_only:
+        if pcfg["short_leg"] == "bottom_decile":
+            short_mask = ranked <= 0.1
+        else:
+            short_mask = ranked <= 0.2
 
     # Weight by conviction within each leg
     if pcfg["weighting"] == "conviction":
         long_scores = scores[long_mask]
-        short_scores = scores[short_mask]
         if len(long_scores) > 0:
             weights[long_mask] = long_scores / long_scores.abs().sum()
-        if len(short_scores) > 0:
-            weights[short_mask] = short_scores / short_scores.abs().sum()
+        if not long_only:
+            short_scores = scores[short_mask]
+            if len(short_scores) > 0:
+                weights[short_mask] = short_scores / short_scores.abs().sum()
     else:
         n_long = long_mask.sum()
-        n_short = short_mask.sum()
         if n_long > 0:
             weights[long_mask] = 1.0 / n_long
-        if n_short > 0:
-            weights[short_mask] = -1.0 / n_short
+        if not long_only:
+            n_short = short_mask.sum()
+            if n_short > 0:
+                weights[short_mask] = -1.0 / n_short
 
-    # Dollar-neutral constraint
-    if pcfg.get("dollar_neutral", True):
-        long_sum = weights[weights > 0].sum()
+    # Normalise: long weights sum to 1
+    long_sum = weights[weights > 0].sum()
+    if long_sum > 0:
+        weights[weights > 0] /= long_sum
+
+    if not long_only:
         short_sum = weights[weights < 0].abs().sum()
-        if long_sum > 0:
-            weights[weights > 0] *= 1.0 / long_sum
         if short_sum > 0:
-            weights[weights < 0] *= -1.0 / short_sum
+            weights[weights < 0] /= -short_sum
 
     # Position caps
     weights = weights.clip(-max_name, max_name)
@@ -92,7 +99,7 @@ def rank_weighted_portfolio(
     # Sector caps
     if sectors is not None and not sectors.empty:
         aligned_sectors = sectors.reindex(weights.index)
-        for side_mask, cap_sign in [(weights > 0, 1), (weights < 0, -1)]:
+        for side_mask in ([weights > 0] if long_only else [weights > 0, weights < 0]):
             side_weights = weights[side_mask]
             if side_weights.empty:
                 continue
@@ -102,13 +109,14 @@ def rank_weighted_portfolio(
                 scale = max_sector / sector_exposure[sect]
                 weights[mask] *= scale
 
-    # Re-normalise to dollar-neutral
+    # Re-normalise long weights to sum to 1
     long_sum = weights[weights > 0].sum()
-    short_sum = weights[weights < 0].abs().sum()
     if long_sum > 0:
         weights[weights > 0] /= long_sum
-    if short_sum > 0:
-        weights[weights < 0] /= -short_sum
+    if not long_only:
+        short_sum = weights[weights < 0].abs().sum()
+        if short_sum > 0:
+            weights[weights < 0] /= -short_sum
 
     return weights
 

@@ -38,7 +38,7 @@ def build_primary_model(cfg: dict, early_stopping: bool = True) -> XGBClassifier
     params = cfg["modeling"]["primary"]["params"].copy()
     n_est = params.pop("n_estimators", 1500)
     early = params.pop("early_stopping_rounds", 50)
-    kw = dict(n_estimators=n_est, use_label_encoder=False, **params)
+    kw = dict(n_estimators=n_est, use_label_encoder=False, random_state=42, **params)
     if early_stopping:
         kw["early_stopping_rounds"] = early
     return XGBClassifier(**kw)
@@ -84,7 +84,7 @@ def construct_meta_labels(
 def build_meta_model(cfg: dict) -> RandomForestClassifier:
     """Instantiate the meta-labeling Random Forest."""
     params = cfg["modeling"]["meta"]["params"].copy()
-    return RandomForestClassifier(**params)
+    return RandomForestClassifier(random_state=42, **params)
 
 
 def train_meta_model(
@@ -152,17 +152,18 @@ def _out_of_fold_primary_predictions(
     observation's meta-target is derived from a model that never
     saw that observation.
     """
-    from sklearn.model_selection import KFold
-
+    # -1 sentinel: fold 0 has no history to train on, so it gets no prediction.
     oof_preds = np.full(len(y_train), -1, dtype=int)
     sorted_idx = dates_train.argsort().values
     fold_size = len(sorted_idx) // n_folds
 
-    for k in range(n_folds):
+    # Start at k=1: fold 0 has no prior data, so skip it.
+    # tr_idx uses only past folds — never future ones.
+    for k in range(1, n_folds):
         val_start = k * fold_size
         val_end = (k + 1) * fold_size if k < n_folds - 1 else len(sorted_idx)
         val_idx = sorted_idx[val_start:val_end]
-        tr_idx = np.concatenate([sorted_idx[:val_start], sorted_idx[val_end:]])
+        tr_idx = sorted_idx[:val_start]  # past only
 
         model = build_primary_model(cfg, early_stopping=False)
         model.fit(X_train.iloc[tr_idx], y_train.iloc[tr_idx])
@@ -186,6 +187,7 @@ def run_two_stage_pipeline(
     Fix #4: Meta-label targets are built from out-of-fold primary
             predictions, not in-sample predictions.
     """
+    np.random.seed(42)
     from src.modeling.cpcv_pipeline import evaluate_cpcv
 
     feature_cols = [c for c in X.columns if X[c].dtype in ("float64", "float32", "int64")]
@@ -210,54 +212,77 @@ def run_two_stage_pipeline(
         print(f"  Mean OOS accuracy: {cpcv_results['accuracy'].mean():.4f}")
         print(f"  Mean OOS AUC:      {cpcv_results['auc'].mean():.4f}")
 
-    # ── Production split ──
-    sorted_dates = dates.sort_values()
-    split_date = sorted_dates.iloc[int(len(sorted_dates) * 0.8)]
-    train_mask = dates <= split_date
-    test_mask = dates > split_date
+    # ── Three-way temporal split ──
+    # train_model: [0%, val_start)   — fit primary + OOF for meta
+    # validation:  [val_start, test_start) — tune bet sizing (leakage-free)
+    # test:        [test_start, ...)  — final evaluation
+    test_start = cfg.get("universe", {}).get("test_start_date")
+    if test_start:
+        test_split = pd.Timestamp(test_start)
+    else:
+        sorted_dates = dates.sort_values()
+        test_split = sorted_dates.iloc[int(len(sorted_dates) * 0.8)]
 
-    X_tr, y_tr = X_clean[train_mask], y[train_mask]
+    test_mask = dates > test_split
+    pre_test = dates <= test_split
+
+    # Validation = last 12.5% of pre-test data (~70/12.5/17.5 split)
+    pre_test_dates = dates[pre_test].sort_values()
+    val_split = pre_test_dates.iloc[int(len(pre_test_dates) * 0.85)]
+    train_model_mask = dates <= val_split
+    val_mask = (dates > val_split) & (dates <= test_split)
+
+    X_tr, y_tr = X_clean[train_model_mask], y[train_model_mask]
+    X_val, y_val = X_clean[val_mask], y[val_mask]
     X_te, y_te = X_clean[test_mask], y[test_mask]
-    dates_tr = dates[train_mask]
-    t_barrier_tr = t_barrier[train_mask]
+    dates_tr = dates[train_model_mask]
+    dates_val = dates[val_mask]
+    t_barrier_tr = t_barrier[train_model_mask]
 
-    # ── FIX #1: Early stopping on a VALIDATION slice carved from
-    #    training data, NOT the test set. Last 10% of training period
-    #    is held out for early-stopping monitoring. ──
+    print(f"  Three-way split:")
+    print(f"    Train model: {len(X_tr)} obs (→ {val_split.date()})")
+    print(f"    Validation:  {len(X_val)} obs ({val_split.date()} → {test_split.date()})")
+    print(f"    Test:        {len(X_te)} obs ({test_split.date()} →)")
+
+    # ── FIX #1: Early stopping on last 10% of model-training data ──
     print("[Phase 4] Training primary directional model (XGBoost) …")
     tr_sorted = dates_tr.sort_values()
-    val_split = tr_sorted.iloc[int(len(tr_sorted) * 0.9)]
-    tr_fit_mask = dates_tr <= val_split
-    tr_val_mask = dates_tr > val_split
+    es_split = tr_sorted.iloc[int(len(tr_sorted) * 0.9)]
+    tr_fit_mask = dates_tr <= es_split
+    tr_es_mask = dates_tr > es_split
 
     X_tr_fit, y_tr_fit = X_tr[tr_fit_mask.values], y_tr[tr_fit_mask.values]
-    X_tr_val, y_tr_val = X_tr[tr_val_mask.values], y_tr[tr_val_mask.values]
+    X_tr_es, y_tr_es = X_tr[tr_es_mask.values], y_tr[tr_es_mask.values]
 
     primary = build_primary_model(cfg, early_stopping=True)
-    primary = train_primary_model(primary, X_tr_fit, y_tr_fit, X_tr_val, y_tr_val)
+    primary = train_primary_model(primary, X_tr_fit, y_tr_fit, X_tr_es, y_tr_es)
     print(f"  Primary model: trained on {len(X_tr_fit)} obs, "
-          f"validated on {len(X_tr_val)} obs (from training period)")
+          f"early-stop on {len(X_tr_es)} obs")
 
     primary_preds_test = primary.predict(X_te)
     primary_proba_test = primary.predict_proba(X_te)
 
-    # ── FIX #4: Out-of-fold primary predictions for meta-label targets.
-    #    Each training observation's meta-target comes from a model
-    #    that never saw that observation. ──
+    # ── FIX #4: Out-of-fold primary predictions for meta-label targets ──
     print("[Phase 4] Generating out-of-fold predictions for meta-labels …")
     oof_primary_preds = _out_of_fold_primary_predictions(
         X_tr, y_tr, dates_tr, t_barrier_tr, cfg, n_folds=5,
     )
-    meta_target_train = construct_meta_labels(oof_primary_preds, y_tr)
+    oof_valid = oof_primary_preds != -1
+    meta_target_train = construct_meta_labels(
+        oof_primary_preds[oof_valid],
+        y_tr.iloc[oof_valid],
+    )
     print(f"  OOF meta-target balance: "
           f"{(meta_target_train == 1).sum()} correct / "
           f"{(meta_target_train == 0).sum()} incorrect")
+    print(f"  (fold 0 excluded: {(~oof_valid).sum()} obs had no prior training data)")
 
-    # Stage 2: Meta-Model
+    # Stage 2: Meta-Model (trained on model-training data only)
     print("[Phase 4] Training meta-model (Random Forest) …")
     meta_model = build_meta_model(cfg)
-    meta_model = train_meta_model(meta_model, X_tr, meta_target_train)
+    meta_model = train_meta_model(meta_model, X_tr.iloc[oof_valid], meta_target_train)
 
+    # ── Predictions on test set ──
     meta_proba_test = meta_model.predict_proba(X_te)
     meta_prob_correct = (
         meta_proba_test[:, 1] if meta_proba_test.shape[1] > 1
@@ -267,7 +292,16 @@ def run_two_stage_pipeline(
     direction = np.where(primary_preds_test == 1, 1, -1).astype(float)
     bet_sizes = compute_bet_sizes(direction, meta_prob_correct, cfg)
 
-    print(f"  Non-zero positions: {np.count_nonzero(bet_sizes)} / {len(bet_sizes)}")
+    # ── Predictions on validation set (for leakage-free bet sizing sweep) ──
+    val_preds = primary.predict(X_val)
+    val_meta_proba = meta_model.predict_proba(X_val)
+    val_meta_prob = (
+        val_meta_proba[:, 1] if val_meta_proba.shape[1] > 1
+        else val_meta_proba[:, 0]
+    )
+    val_direction = np.where(val_preds == 1, 1, -1).astype(float)
+
+    print(f"  Non-zero positions (test): {np.count_nonzero(bet_sizes)} / {len(bet_sizes)}")
 
     return {
         "primary_model": primary,
@@ -282,6 +316,10 @@ def run_two_stage_pipeline(
         "direction": direction,
         "bet_sizes": bet_sizes,
         "feature_cols": feature_cols,
-        "train_mask": train_mask,
+        "train_mask": train_model_mask,
+        "val_mask": val_mask,
         "test_mask": test_mask,
+        # Validation set outputs for bet sizing sweep
+        "val_direction": val_direction,
+        "val_meta_probability": val_meta_prob,
     }
